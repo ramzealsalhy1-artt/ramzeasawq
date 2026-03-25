@@ -1,5 +1,8 @@
 {
-  "buildCommand": "echo 'No build required'",
+  "buildCommand": "",
   "outputDirectory": ".",
-  "installCommand": "echo 'No install required'"
+  "installCommand": "",
+  "framework": null,
+  "cleanUrls": true,
+  "trailingSlash": false
 }
