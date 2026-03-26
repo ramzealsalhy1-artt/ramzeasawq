@@ -330,7 +330,7 @@
             },
             "products": {
                 "store-cat1-0": [
-                    { "id": 1, "name": "عطر مسك أبيض", "oldPrice": 322, "newPrice": 156, "image": "https://picsum.photos/seed/pcat101/300/300", "link": "#" },
+                    { "id": 1, "name": "عطر م��ك أبيض", "oldPrice": 322, "newPrice": 156, "image": "https://picsum.photos/seed/pcat101/300/300", "link": "#" },
                     { "id": 2, "name": "دهن عود كمبودي", "oldPrice": 432, "newPrice": 267, "image": "https://picsum.photos/seed/pcat102/300/300", "link": "#" }
                 ],
                 "store-cat2-0": [
@@ -930,7 +930,7 @@
                 });
             }
 
-            // توليد منتجات تجريبية لملء الأشرطة
+            // تولي�� منتجات تجريبية لملء الأشرطة
             function generateDemoProduct(stripIndex, posInStrip) {
                 const categoriesForDemo = ["عطر", "هدية", "إكسسوار", "ملابس", "جهاز إلكتروني"];
                 const demoName = `${categoriesForDemo[stripIndex % categoriesForDemo.length]} تجريبي ${posInStrip + 1}`;
@@ -1118,5 +1118,11 @@
             if (window.location.hash) window.dispatchEvent(new Event('hashchange'));
         });
     </script>
+    
+    <!-- Vercel Speed Insights -->
+    <script>
+        window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+    </script>
+    <script defer src="/_vercel/speed-insights/script.js"></script>
 </body>
 </html>
