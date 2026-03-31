@@ -2,6 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>لوحة التحكم - أسواق ريادة المستهلك</title>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
@@ -17,16 +18,18 @@
         .admin-container { max-width: 1400px; margin: 0 auto; display: none; }
         h1 { text-align: center; color: #fbbf24; margin: 20px 0; }
         .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px,1fr)); gap: 20px; }
-        .admin-card { background: rgba(15,23,42,0.8); backdrop-filter: blur(10px); border-radius: 30px; padding: 20px; border: 1px solid #334155; }
+        .admin-card { background: rgba(15,23,42,0.8); backdrop-filter: blur(10px); border-radius: 30px; padding: 20px; border: 1px solid #334155; transition: 0.2s; }
+        .admin-card:hover { transform: translateY(-3px); }
         .admin-card h2 { color: #fbbf24; margin-bottom: 15px; border-bottom: 2px solid #334155; padding-bottom: 10px; }
         .admin-form input, .admin-form textarea, .admin-form select { width: 100%; padding: 12px; border-radius: 40px; border: none; background: #1e293b; color: white; margin-bottom: 10px; }
         .admin-form button { background: #fbbf24; color: #0f172a; border: none; padding: 12px; border-radius: 40px; font-weight: bold; cursor: pointer; width: 100%; }
         .admin-list { background: #1e293b; border-radius: 20px; padding: 15px; max-height: 300px; overflow-y: auto; }
-        .admin-item { background: #2d3a4f; padding: 10px; border-radius: 40px; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .admin-item { background: #2d3a4f; padding: 10px; border-radius: 40px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
         .admin-item button { background: #ef4444; border: none; padding: 5px 15px; border-radius: 30px; color: white; cursor: pointer; margin-right: 5px; }
         .admin-item button.edit { background: #3b82f6; }
         .back-link { display: inline-block; background: #3b82f6; color: white; padding: 10px 25px; border-radius: 40px; text-decoration: none; margin-bottom: 20px; }
-        .toast-message { position: fixed; bottom: 20px; left: 20px; background: #10b981; color: white; padding: 12px 24px; border-radius: 40px; z-index: 9999; }
+        .toast-message { position: fixed; bottom: 20px; left: 20px; background: #10b981; color: white; padding: 12px 24px; border-radius: 40px; z-index: 9999; animation: slideIn 0.3s; }
+        @keyframes slideIn { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .preview-btn { position: fixed; bottom: 20px; right: 20px; background: #3b82f6; color: white; border: none; padding: 12px 25px; border-radius: 40px; cursor: pointer; z-index: 9999; }
         .error-message { background: #ef4444; color: white; padding: 10px; border-radius: 10px; margin: 10px 0; text-align: center; }
     </style>
@@ -49,89 +52,84 @@
 <button class="preview-btn" id="previewBtn">معاينة الموقع</button>
 
 <script>
+    const SECRET = "202122";
     const SUPABASE_URL = 'https://mtsebbgjchuzjddblywl.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_nc3_YZT-EVwa-bPfqqnFpA_ko2q-z-L';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const SECRET = "202122";
-
+    let supabase;
     let appData = null;
 
-    function showToast(msg, err=false) {
-        let t = document.createElement('div');
-        t.className = 'toast-message';
-        t.innerText = msg;
-        t.style.background = err ? '#ef4444' : '#10b981';
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 3000);
-    }
+    window.checkLogin = function() {
+        const code = document.getElementById('secretCode').value;
+        const errorDiv = document.getElementById('loginError');
+        if (code === SECRET) {
+            sessionStorage.setItem('adminLoggedIn', 'true');
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            document.getElementById('loginOverlay').style.display = 'none';
+            document.getElementById('adminContent').style.display = 'block';
+            loadAllData();
+        } else {
+            errorDiv.innerText = '❌ الرمز غير صحيح';
+        }
+    };
 
-    async function loadAll() {
+    async function loadAllData() {
         const loadingDiv = document.getElementById('loadingMessage');
         const adminGrid = document.getElementById('adminGrid');
         try {
-            // اختبار الاتصال أولاً
-            const { data: testData, error: testError } = await supabase.from('settings').select('*').limit(1);
-            if (testError) throw new Error('فشل الاتصال بقاعدة البيانات: ' + testError.message);
-            
-            // تحميل البيانات
+            // اختبار الاتصال
+            const { data: test, error: testErr } = await supabase.from('settings').select('*').limit(1);
+            if (testErr) throw new Error(testErr.message);
+
             const { data: settings } = await supabase.from('settings').select('*').single();
             const { data: categories } = await supabase.from('categories').select('*').order('indexOrder');
             const { data: stores } = await supabase.from('stores').select('*');
             const { data: products } = await supabase.from('products').select('*');
             const { data: testimonials } = await supabase.from('testimonials').select('*');
+
             appData = { settings, categories, stores, products, testimonials };
-            
-            // بناء واجهة لوحة التحكم
-            buildAdminUI();
+            buildUI();
             loadingDiv.style.display = 'none';
             adminGrid.style.display = 'grid';
         } catch (err) {
             console.error(err);
-            loadingDiv.innerHTML = `<div class="error-message">❌ خطأ: ${err.message}<br>تأكد من أن الجداول موجودة و RLS معطل.</div>`;
+            loadingDiv.innerHTML = `<div class="error-message">❌ ${err.message}<br>تأكد من أن الجداول موجودة و RLS معطل.</div>`;
             loadingDiv.style.display = 'block';
             adminGrid.style.display = 'none';
-            showToast(err.message, true);
         }
     }
 
-    function buildAdminUI() {
+    function buildUI() {
         const grid = document.getElementById('adminGrid');
         grid.innerHTML = `
-            <!-- عداد الزوار -->
             <div class="admin-card"><h2>عداد الزوار</h2><div style="background:#fbbf24; color:#0f172a; text-align:center; padding:15px; border-radius:40px;">عدد الزوار: <span id="visitorCount">0</span></div><button id="resetVisitor" style="background:#f59e0b; margin-top:10px;">إعادة تعيين</button></div>
-            <!-- الإعدادات العامة -->
             <div class="admin-card"><h2>الإعدادات العامة</h2><div class="admin-form"><select id="currencySelect"><option value="SAR">ريال سعودي</option><option value="USD">دولار</option></select><input type="checkbox" id="cartEnabled"> تفعيل السلة<br><input type="checkbox" id="showSaudiFlag"> علم السعودية<br><button id="saveSettings">حفظ</button></div></div>
-            <!-- الفئات -->
             <div class="admin-card"><h2>الفئات</h2><div class="admin-form"><input type="text" id="catName" placeholder="الاسم"><input type="text" id="catSlug" placeholder="slug"><input type="text" id="catIcon" placeholder="أيقونة"><input type="color" id="catColor"><button id="addCat">➕ إضافة</button></div><div class="admin-list" id="categoriesList"></div></div>
-            <!-- المتاجر -->
             <div class="admin-card"><h2>المتاجر</h2><div class="admin-form"><select id="storeCatSelect"></select><input type="text" id="storeName" placeholder="اسم المتجر"><input type="text" id="storeLogo" placeholder="رابط الشعار"><button id="addStore">➕ إضافة</button></div><div class="admin-list" id="storesList"></div></div>
-            <!-- المنتجات -->
             <div class="admin-card"><h2>المنتجات</h2><div class="admin-form"><select id="productStoreSelect"></select><input type="text" id="productName" placeholder="الاسم"><input type="number" id="productOldPrice" placeholder="السعر القديم"><input type="number" id="productNewPrice" placeholder="السعر الجديد"><input type="text" id="productImage" placeholder="رابط الصورة"><button id="addProduct">➕ إضافة</button></div><div class="admin-list" id="productsList"></div></div>
-            <!-- التقييمات -->
             <div class="admin-card"><h2>التقييمات</h2><div class="admin-form"><input type="text" id="testName" placeholder="الاسم"><input type="number" id="testRating" placeholder="التقييم (1-5)"><textarea id="testReview" placeholder="النص"></textarea><button id="addTest">➕ إضافة</button></div><div class="admin-list" id="testimonialsList"></div></div>
         `;
-        
+
         // تعبئة القوائم المنسدلة
         const storeCat = document.getElementById('storeCatSelect');
         storeCat.innerHTML = '<option>اختر الفئة</option>';
         appData.categories.forEach(c => storeCat.innerHTML += `<option value="${c.name}">${c.name}</option>`);
-        
+
         const prodStore = document.getElementById('productStoreSelect');
         prodStore.innerHTML = '<option>اختر المتجر</option>';
         appData.stores.forEach(s => prodStore.innerHTML += `<option value="${s.id}">${s.name}</option>`);
-        
+
         // عرض القوائم
         renderCategoriesList();
         renderStoresList();
         renderProductsList();
         renderTestimonialsList();
-        
-        // القيم الافتراضية للإعدادات
+
+        // تعبئة الإعدادات الحالية
         document.getElementById('currencySelect').value = appData.settings?.currency || 'SAR';
         document.getElementById('cartEnabled').checked = appData.settings?.cartEnabled || false;
         document.getElementById('showSaudiFlag').checked = appData.settings?.showSaudiFlag || false;
         document.getElementById('visitorCount').innerText = localStorage.getItem('visitorCount') || 0;
-        
+
         // ربط الأحداث
         document.getElementById('saveSettings').onclick = saveSettings;
         document.getElementById('resetVisitor').onclick = () => { localStorage.setItem('visitorCount',0); document.getElementById('visitorCount').innerText = 0; showToast('تم إعادة العداد'); };
@@ -140,7 +138,7 @@
         document.getElementById('addProduct').onclick = addProduct;
         document.getElementById('addTest').onclick = addTestimonial;
     }
-    
+
     function renderCategoriesList() {
         const cont = document.getElementById('categoriesList');
         cont.innerHTML = '';
@@ -170,58 +168,94 @@
             cont.innerHTML += `<div class="admin-item"><span>${t.name}</span><div><button class="edit" onclick="editTestimonial(${t.id})">تعديل</button><button onclick="deleteTestimonial(${t.id})">حذف</button></div></div>`;
         });
     }
-    
-    // دوال الإضافة والحذف (يمكنك توسيعها)
+
+    // دوال الإضافة والحذف
     async function addCategory() {
         const name = document.getElementById('catName').value;
         if (!name) return alert('الاسم مطلوب');
-        await supabase.from('categories').insert([{name, slug:document.getElementById('catSlug').value, icon:document.getElementById('catIcon').value, color:document.getElementById('catColor').value, showInIndex:true}]);
-        loadAll();
+        await supabase.from('categories').insert([{
+            name,
+            slug: document.getElementById('catSlug').value,
+            icon: document.getElementById('catIcon').value,
+            color: document.getElementById('catColor').value,
+            showInIndex: true
+        }]);
+        showToast('تم إضافة الفئة');
+        loadAllData();
     }
     async function addStore() {
         const cat = document.getElementById('storeCatSelect').value;
         const name = document.getElementById('storeName').value;
         if (!cat || !name) return alert('املأ البيانات');
-        await supabase.from('stores').insert([{id:'store-'+Date.now(), name, category:cat, logo:document.getElementById('storeLogo').value, hidden:false}]);
-        loadAll();
+        await supabase.from('stores').insert([{
+            id: 'store-' + Date.now(),
+            name,
+            category: cat,
+            logo: document.getElementById('storeLogo').value,
+            hidden: false
+        }]);
+        showToast('تم إضافة المتجر');
+        loadAllData();
     }
     async function addProduct() {
         const sid = document.getElementById('productStoreSelect').value;
         const name = document.getElementById('productName').value;
         if (!sid || !name) return alert('املأ البيانات');
-        await supabase.from('products').insert([{store_id:sid, name, oldPrice:parseFloat(document.getElementById('productOldPrice').value), newPrice:parseFloat(document.getElementById('productNewPrice').value), image:document.getElementById('productImage').value}]);
-        loadAll();
+        await supabase.from('products').insert([{
+            store_id: sid,
+            name,
+            oldPrice: parseFloat(document.getElementById('productOldPrice').value),
+            newPrice: parseFloat(document.getElementById('productNewPrice').value),
+            image: document.getElementById('productImage').value
+        }]);
+        showToast('تم إضافة المنتج');
+        loadAllData();
     }
     async function addTestimonial() {
-        await supabase.from('testimonials').insert([{name:document.getElementById('testName').value, rating:parseInt(document.getElementById('testRating').value), review:document.getElementById('testReview').value}]);
-        loadAll();
+        await supabase.from('testimonials').insert([{
+            name: document.getElementById('testName').value,
+            rating: parseInt(document.getElementById('testRating').value),
+            review: document.getElementById('testReview').value
+        }]);
+        showToast('تم إضافة التقييم');
+        loadAllData();
     }
-    window.deleteCategory = async (id) => { if(confirm('حذف؟')){ await supabase.from('categories').delete().eq('id',id); loadAll(); } };
-    window.deleteStore = async (id) => { if(confirm('حذف؟')){ await supabase.from('stores').delete().eq('id',id); loadAll(); } };
-    window.deleteProduct = async (id) => { if(confirm('حذف؟')){ await supabase.from('products').delete().eq('id',id); loadAll(); } };
-    window.deleteTestimonial = async (id) => { if(confirm('حذف؟')){ await supabase.from('testimonials').delete().eq('id',id); loadAll(); } };
     async function saveSettings() {
-        await supabase.from('settings').update({currency:document.getElementById('currencySelect').value, cartEnabled:document.getElementById('cartEnabled').checked, showSaudiFlag:document.getElementById('showSaudiFlag').checked}).eq('id',1);
+        await supabase.from('settings').update({
+            currency: document.getElementById('currencySelect').value,
+            cartEnabled: document.getElementById('cartEnabled').checked,
+            showSaudiFlag: document.getElementById('showSaudiFlag').checked
+        }).eq('id', 1);
         showToast('تم حفظ الإعدادات');
     }
-    
-    window.checkLogin = function() {
-        const code = document.getElementById('secretCode').value;
-        const errorDiv = document.getElementById('loginError');
-        if (code === SECRET) {
+
+    window.deleteCategory = async (id) => { if (confirm('حذف الفئة؟')) { await supabase.from('categories').delete().eq('id', id); loadAllData(); } };
+    window.deleteStore = async (id) => { if (confirm('حذف المتجر؟')) { await supabase.from('stores').delete().eq('id', id); loadAllData(); } };
+    window.deleteProduct = async (id) => { if (confirm('حذف المنتج؟')) { await supabase.from('products').delete().eq('id', id); loadAllData(); } };
+    window.deleteTestimonial = async (id) => { if (confirm('حذف التقييم؟')) { await supabase.from('testimonials').delete().eq('id', id); loadAllData(); } };
+    window.editCategory = (id) => alert(`تعديل الفئة ${id} (يمكن تنفيذه لاحقاً)`);
+    window.editStore = (id) => alert(`تعديل المتجر ${id} (يمكن تنفيذه لاحقاً)`);
+    window.editProduct = (storeId, productId) => alert(`تعديل المنتج ${productId} (يمكن تنفيذه لاحقاً)`);
+    window.editTestimonial = (id) => alert(`تعديل التقييم ${id} (يمكن تنفيذه لاحقاً)`);
+
+    function showToast(msg) {
+        let t = document.createElement('div');
+        t.className = 'toast-message';
+        t.innerText = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
+
+    // استعادة الجلسة
+    if (sessionStorage.getItem('adminLoggedIn') === 'true') {
+        setTimeout(() => {
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             document.getElementById('loginOverlay').style.display = 'none';
             document.getElementById('adminContent').style.display = 'block';
-            loadAll();
-        } else {
-            errorDiv.innerText = '❌ الرمز غير صحيح';
-        }
-    };
-    
-    // إذا كان قد سجل دخول من قبل
-    if (sessionStorage.getItem('adminLoggedIn') === 'true') {
-        checkLogin();
+            loadAllData();
+        }, 100);
     }
-    
+
     document.getElementById('previewBtn').onclick = () => window.open('index.html', '_blank');
 </script>
 </body>
