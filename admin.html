@@ -44,6 +44,8 @@
         .import-export button { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 40px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .import-export button:hover { filter: brightness(1.1); transform: scale(1.02); }
         #importFile { display: none; }
+        .spinner { display: none; width: 20px; height: 20px; border: 2px solid #fff; border-top: 2px solid #fbbf24; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 10px; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @media (max-width: 768px) { .admin-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -59,7 +61,7 @@
     <div class="admin-container" id="adminContent" style="display: none;">
         <div class="auto-save-badge" id="autoSaveBadge">✓ جميع التغييرات محفوظة</div>
         <a href="index.html" class="back-link">← العودة للموقع</a>
-        <h1>لوحة التحكم (Supabase)</h1>
+        <h1>لوحة التحكم (Supabase) - محسّنة</h1>
 
         <div class="admin-grid">
             <!-- عداد الزوار -->
@@ -496,9 +498,14 @@
         let currentEditCarouselId = null;
         let currentEditTestimonialIndex = null;
 
-        // ================== دوال Supabase الأساسية ==================
+        // متغير لتتبع الجداول المتغيرة
+        let changedTables = new Set();
+        let isSaving = false;
+
+        // ================== دوال Supabase المحسّنة ==================
         async function loadFromSupabase() {
             try {
+                // تحميل الإعدادات فقط (مع تحديد الأعمدة)
                 const { data: settings, error: settingsErr } = await supabaseClient
                     .from('settings')
                     .select('data')
@@ -509,6 +516,7 @@
                     await seedSupabase();
                     return await loadFromSupabase();
                 }
+                // تحميل باقي الجداول مع تحديد الأعمدة الضرورية
                 const [categoriesRes, storesRes, productsRes, testimonialsRes, carouselRes, messagesRes] = await Promise.all([
                     supabaseClient.from('categories').select('*'),
                     supabaseClient.from('stores').select('*'),
@@ -556,36 +564,90 @@
         }
 
         async function saveToSupabase() {
-            if (!appData) return;
+            if (!appData || isSaving) return;
+            if (changedTables.size === 0) return;
+            isSaving = true;
+            showSpinner(true);
             try {
-                await supabaseClient.from('settings').upsert({
-                    id: 'main',
-                    data: {
-                        header: appData.header,
-                        ticker: appData.ticker,
-                        design: appData.design,
-                        footer: appData.footer,
-                        settings: appData.settings
-                    }
-                });
-                for (const cat of appData.categories) await supabaseClient.from('categories').upsert(cat);
-                const allStores = [];
-                for (const cat in appData.stores) allStores.push(...appData.stores[cat]);
-                for (const store of allStores) await supabaseClient.from('stores').upsert(store);
-                const allProducts = [];
-                for (const storeId in appData.products) {
-                    for (const prod of appData.products[storeId]) allProducts.push({ ...prod, storeId });
+                const promises = [];
+                if (changedTables.has('settings')) {
+                    promises.push(supabaseClient.from('settings').upsert({
+                        id: 'main',
+                        data: {
+                            header: appData.header,
+                            ticker: appData.ticker,
+                            design: appData.design,
+                            footer: appData.footer,
+                            settings: appData.settings
+                        }
+                    }));
                 }
-                for (const prod of allProducts) await supabaseClient.from('products').upsert(prod);
-                for (const t of appData.testimonials) await supabaseClient.from('testimonials').upsert(t);
-                for (const ad of appData.carousel) await supabaseClient.from('carousel').upsert(ad);
-                for (const msg of appData.messages) await supabaseClient.from('messages').upsert(msg);
+                if (changedTables.has('categories')) {
+                    for (const cat of appData.categories) {
+                        promises.push(supabaseClient.from('categories').upsert(cat));
+                    }
+                }
+                if (changedTables.has('stores')) {
+                    const allStores = [];
+                    for (const cat in appData.stores) allStores.push(...appData.stores[cat]);
+                    for (const store of allStores) {
+                        promises.push(supabaseClient.from('stores').upsert(store));
+                    }
+                }
+                if (changedTables.has('products')) {
+                    const allProducts = [];
+                    for (const storeId in appData.products) {
+                        for (const prod of appData.products[storeId]) allProducts.push({ ...prod, storeId });
+                    }
+                    for (const prod of allProducts) {
+                        promises.push(supabaseClient.from('products').upsert(prod));
+                    }
+                }
+                if (changedTables.has('testimonials')) {
+                    for (const t of appData.testimonials) {
+                        promises.push(supabaseClient.from('testimonials').upsert(t));
+                    }
+                }
+                if (changedTables.has('carousel')) {
+                    for (const ad of appData.carousel) {
+                        promises.push(supabaseClient.from('carousel').upsert(ad));
+                    }
+                }
+                if (changedTables.has('messages')) {
+                    for (const msg of appData.messages) {
+                        promises.push(supabaseClient.from('messages').upsert(msg));
+                    }
+                }
+                await Promise.all(promises);
                 localStorage.setItem('marketsDB', JSON.stringify(appData));
                 updateAutoSaveBadge();
                 if (window.broadcastChannel) window.broadcastChannel.postMessage({ type: 'DB_UPDATE', timestamp: Date.now() });
+                changedTables.clear();
             } catch (err) {
                 console.error(err);
                 showToast("خطأ في حفظ البيانات");
+            } finally {
+                isSaving = false;
+                showSpinner(false);
+            }
+        }
+
+        function showSpinner(show) {
+            const badge = document.getElementById('autoSaveBadge');
+            if (show) {
+                badge.innerHTML = '<span class="spinner"></span> جاري الحفظ...';
+                badge.style.background = '#f59e0b';
+            } else {
+                badge.innerHTML = '✓ جميع التغييرات محفوظة';
+                badge.style.background = '#fbbf24';
+            }
+        }
+
+        function updateAutoSaveBadge() {
+            const badge = document.getElementById('autoSaveBadge');
+            if (badge) {
+                badge.innerHTML = '✓ جميع التغييرات محفوظة';
+                badge.style.background = '#fbbf24';
             }
         }
 
@@ -637,18 +699,6 @@
             showToast("✅ تم تهيئة قاعدة البيانات بنجاح");
         }
 
-        function updateAutoSaveBadge() {
-            const badge = document.getElementById('autoSaveBadge');
-            if (badge) {
-                badge.textContent = '✓ جاري الحفظ...';
-                badge.style.background = '#f59e0b';
-                setTimeout(() => {
-                    badge.textContent = '✓ جميع التغييرات محفوظة';
-                    badge.style.background = '#fbbf24';
-                }, 500);
-            }
-        }
-
         function showToast(msg) {
             const toast = document.createElement('div');
             toast.className = 'toast-message';
@@ -659,7 +709,7 @@
 
         function sanitizeText(str) { if (!str) return ''; const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
 
-        // ================== دوال عرض القوائم ==================
+        // ================== دوال عرض القوائم (بدون تغيير) ==================
         function refreshAllLists() {
             populateCategoriesList();
             if (document.getElementById('storeCategorySelect').value) populateStoresList(document.getElementById('storeCategorySelect').value);
@@ -852,7 +902,7 @@
             return null;
         }
 
-        // ================== دوال CRUD ==================
+        // ================== دوال CRUD مع تتبع الجداول المتغيرة ==================
         window.editCategory = function(id) {
             const cat = appData.categories.find(c => c.id === id);
             if (!cat) return;
@@ -876,6 +926,7 @@
                 appData.categories = appData.categories.filter(c => c.id !== id);
                 const catName = appData.categories.find(c => c.id === id)?.name;
                 if (catName && appData.stores[catName]) delete appData.stores[catName];
+                changedTables.add('categories');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف الفئة بنجاح');
@@ -904,6 +955,7 @@
             const store = findStoreById(storeId);
             if (store) {
                 store.hidden = !store.hidden;
+                changedTables.add('stores');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast(store.hidden ? 'تم إخفاء المتجر' : 'تم إظهار المتجر');
@@ -917,6 +969,8 @@
                     if (index !== -1) {
                         appData.stores[cat].splice(index, 1);
                         delete appData.products[storeId];
+                        changedTables.add('stores');
+                        changedTables.add('products');
                         await saveToSupabase();
                         refreshAllLists();
                         showToast('تم حذف المتجر');
@@ -945,6 +999,7 @@
                 const index = appData.products[storeId].findIndex(p => p.id == productId);
                 if (index !== -1) {
                     appData.products[storeId].splice(index, 1);
+                    changedTables.add('products');
                     await saveToSupabase();
                     refreshAllLists();
                     showToast('تم حذف المنتج');
@@ -968,6 +1023,7 @@
         window.deleteCarousel = async function(adId) {
             if (confirm('هل أنت متأكد من حذف هذا الإعلان؟')) {
                 appData.carousel = appData.carousel.filter(a => a.id !== adId);
+                changedTables.add('carousel');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف الإعلان');
@@ -989,6 +1045,7 @@
         window.deleteTestimonial = async function(index) {
             if (confirm('هل أنت متأكد من حذف هذا التقييم؟')) {
                 appData.testimonials.splice(index, 1);
+                changedTables.add('testimonials');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف التقييم');
@@ -1009,6 +1066,7 @@
         window.deleteContest = async function(index) {
             if (confirm('هل أنت متأكد من حذف هذه المسابقة؟')) {
                 appData.settings.contests.splice(index, 1);
+                changedTables.add('settings');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف المسابقة');
@@ -1018,6 +1076,7 @@
         window.deleteTrustBadge = async function(index) {
             if (confirm('هل أنت متأكد من حذف هذه الشارة؟')) {
                 appData.settings.trustBadges.splice(index, 1);
+                changedTables.add('settings');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف الشارة');
@@ -1027,13 +1086,14 @@
         window.deleteMessage = async function(index) {
             if (confirm('هل أنت متأكد من حذف هذه الرسالة؟')) {
                 appData.messages.splice(index, 1);
+                changedTables.add('messages');
                 await saveToSupabase();
                 refreshAllLists();
                 showToast('تم حذف الرسالة');
             }
         };
 
-        // ================== أزرار الإضافة والتحديث ==================
+        // ================== أزرار الإضافة والتحديث (مع إضافة changedTables) ==================
         document.getElementById('addCategoryBtn').addEventListener('click', async () => {
             const name = document.getElementById('categoryName').value;
             if (!name) return alert('اسم الفئة مطلوب');
@@ -1052,6 +1112,7 @@
             };
             appData.categories.push(newCat);
             if (!appData.stores[newCat.name]) appData.stores[newCat.name] = [];
+            changedTables.add('categories');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('categoryForm').reset();
@@ -1083,6 +1144,7 @@
                 appData.stores[newName] = appData.stores[oldName];
                 delete appData.stores[oldName];
             }
+            changedTables.add('categories');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('categoryForm').reset();
@@ -1116,6 +1178,8 @@
             if (!appData.stores[category]) appData.stores[category] = [];
             appData.stores[category].push(newStore);
             appData.products[newId] = [];
+            changedTables.add('stores');
+            changedTables.add('products');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('storeForm').reset();
@@ -1138,6 +1202,7 @@
             store.productDisplayMode = document.getElementById('storeProductDisplayMode').value;
             store.productDisplayCount = parseInt(document.getElementById('storeProductDisplayCount').value);
             store.numStrips = parseInt(document.getElementById('storeNumStrips').value);
+            changedTables.add('stores');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('storeForm').reset();
@@ -1163,6 +1228,7 @@
             };
             if (!appData.products[storeId]) appData.products[storeId] = [];
             appData.products[storeId].push(newProduct);
+            changedTables.add('products');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('productForm').reset();
@@ -1180,6 +1246,7 @@
             product.newPrice = parseFloat(document.getElementById('productNewPrice').value);
             product.image = document.getElementById('productImage').value;
             product.link = document.getElementById('productLink').value;
+            changedTables.add('products');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('productForm').reset();
@@ -1203,6 +1270,7 @@
             };
             if (!appData.carousel) appData.carousel = [];
             appData.carousel.push(newAd);
+            changedTables.add('carousel');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('carouselForm').reset();
@@ -1223,6 +1291,7 @@
                 order: parseInt(document.getElementById('carouselOrder').value),
                 active: document.getElementById('carouselActive').checked
             };
+            changedTables.add('carousel');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('carouselForm').reset();
@@ -1242,6 +1311,7 @@
                 review: document.getElementById('testimonialReview').value
             };
             appData.testimonials.push(newTestimonial);
+            changedTables.add('testimonials');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('testimonialForm').reset();
@@ -1258,6 +1328,7 @@
                 rating: parseInt(document.getElementById('testimonialRating').value),
                 review: document.getElementById('testimonialReview').value
             };
+            changedTables.add('testimonials');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('testimonialForm').reset();
@@ -1277,6 +1348,7 @@
             };
             if (!appData.settings.contests) appData.settings.contests = [];
             appData.settings.contests.push(newContest);
+            changedTables.add('settings');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('contestForm').reset();
@@ -1293,6 +1365,7 @@
                 description: document.getElementById('contestDescription').value,
                 endDate: document.getElementById('contestEndDate').value
             };
+            changedTables.add('settings');
             await saveToSupabase();
             refreshAllLists();
             document.getElementById('contestForm').reset();
@@ -1313,6 +1386,7 @@
                 chat: document.getElementById('orderChatCheckbox').checked
             };
             appData.settings.contactEmail = document.getElementById('contactEmail').value;
+            changedTables.add('settings');
             await saveToSupabase();
             showToast('تم حفظ الإعدادات العامة');
         });
@@ -1320,6 +1394,7 @@
         document.getElementById('saveTrustBadges').addEventListener('click', async () => {
             const badges = document.getElementById('trustBadgesInput').value.split('\n').filter(b => b.trim());
             appData.settings.trustBadges = badges;
+            changedTables.add('settings');
             await saveToSupabase();
             refreshAllLists();
             showToast('تم حفظ شارات الثقة');
@@ -1341,6 +1416,7 @@
                 adFontSize: document.getElementById('adFontSize').value,
                 generalFontSize: document.getElementById('generalFontSize').value
             };
+            changedTables.add('settings');
             await saveToSupabase();
             showToast('تم حفظ إعدادات التصميم');
         });
@@ -1350,6 +1426,7 @@
             appData.header.subtitle = document.getElementById('headerSubtitleInput').value;
             const images = document.getElementById('headerImagesInput').value.split('\n').filter(img => img.trim());
             appData.header.images = images;
+            changedTables.add('settings');
             await saveToSupabase();
             showToast('تم حفظ إعدادات الترويسة');
         });
@@ -1357,6 +1434,7 @@
         document.getElementById('saveTickerBtn').addEventListener('click', async () => {
             const tickerTexts = document.getElementById('tickerTextsInput').value.split('\n').filter(t => t.trim());
             appData.ticker = tickerTexts;
+            changedTables.add('settings');
             await saveToSupabase();
             showToast('تم حفظ شريط الإعلانات');
         });
@@ -1373,6 +1451,7 @@
             });
             const paymentsText = document.getElementById('footerPayments').value;
             appData.footer.payments = paymentsText.split(',').map(p => p.trim()).filter(p => p);
+            changedTables.add('settings');
             await saveToSupabase();
             showToast('تم حفظ التذييل');
         });
@@ -1384,6 +1463,7 @@
             if (store) {
                 store.ownerCode = document.getElementById('storeOwnerCode').value;
                 store.allowUpload = document.getElementById('storeAllowUpload').checked;
+                changedTables.add('stores');
                 await saveToSupabase();
                 showToast('تم حفظ أذونات المتجر');
             }
@@ -1433,6 +1513,13 @@
                     const importedData = JSON.parse(ev.target.result);
                     if (!importedData.categories || !importedData.stores || !importedData.products) throw new Error('ملف غير صالح');
                     appData = enhanceData(importedData);
+                    changedTables.add('settings');
+                    changedTables.add('categories');
+                    changedTables.add('stores');
+                    changedTables.add('products');
+                    changedTables.add('testimonials');
+                    changedTables.add('carousel');
+                    changedTables.add('messages');
                     await saveToSupabase();
                     refreshAllLists();
                     showToast('✅ تم استيراد البيانات بنجاح');
@@ -1497,7 +1584,7 @@
                 await loadFromSupabase();
                 refreshAllLists();
                 document.getElementById('visitorCount').textContent = localStorage.getItem('visitorCount') || 0;
-                setInterval(() => { if (appData) saveToSupabase(); }, 30000);
+                setInterval(() => { if (appData && changedTables.size > 0) saveToSupabase(); }, 30000);
                 window.broadcastChannel = new BroadcastChannel('markets_channel');
             } else alert('الرمز غير صحيح');
         };
